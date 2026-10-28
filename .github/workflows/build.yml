@@ -1610,6 +1610,10 @@ jobs:
                 if [ -s "$FRAG" ]; then
                   FRAG_FLAG="--defconfig_fragment=//common:arch/arm64/configs/ksu.fragment"
                 fi
+                if [ -f common/drivers/kernelsu/policy/allowlist.c ]; then
+                  sed -i '/^[[:space:]]*case 3:/i\            __attribute__((fallthrough));' common/drivers/kernelsu/policy/allowlist.c
+                  echo "已为 allowlist.c 添加 fallthrough 标注"
+                fi
                 tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast $FRAG_FLAG //common:kernel_aarch64/Image || exit 1
                 strings ./bazel-bin/common/kernel_aarch64/Image | grep 'Linux version'
               fi
