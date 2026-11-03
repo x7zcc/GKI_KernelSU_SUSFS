@@ -42,6 +42,26 @@ case "$KSU_VARIANT" in
     ;;
 esac
 
+# SukiSU 内置的 kernel/Kconfig 缺少 KSU_SUSFS_PRIORITY_UID_FILTER 选项，
+# 但 kernel/manager/pkg_observer.c 与 kernel/supercall/dispatch.c 无条件调用了
+# susfs_parse_priority_app_strings / susfs_set_priority_uid_filter，
+# 导致 susfs.h 中的声明被 #ifdef 剔除后编译报 undeclared function。
+# 这里为 SukiSU 系列补齐该 Kconfig 符号，使 defconfig 中的 =y 真正生效。
+if [[ "$KSU_VARIANT" == SukiSU* || "$KSU_VARIANT" == "BakaSU" || "$KSU_VARIANT" == "Next" ]]; then
+  KSU_KCONFIG="$KERNEL_ROOT/KernelSU/kernel/Kconfig"
+  if [[ -f "$KSU_KCONFIG" ]] && ! grep -q 'KSU_SUSFS_PRIORITY_UID_FILTER' "$KSU_KCONFIG"; then
+    cat >> "$KSU_KCONFIG" << 'KCONFIG_EOF'
+
+config KSU_SUSFS_PRIORITY_UID_FILTER
+	bool "KernelSU addon - SUSFS priority uid filter"
+	depends on KSU_SUSFS
+	help
+	  Hide the UIDs in the configured range from the getpriority syscall.
+KCONFIG_EOF
+    echo "已为 $KSU_VARIANT 的 kernel/Kconfig 追加 KSU_SUSFS_PRIORITY_UID_FILTER"
+  fi
+fi
+
 cd "$KERNEL_ROOT/common"
 CURRENT_SUB="$SUB_LEVEL"
 if [[ ! "$CURRENT_SUB" =~ ^[0-9]+$ ]]; then
@@ -219,6 +239,13 @@ if grep -q '^ static int thaw_super_locked' "$SUSFS_PATCH" \
 fi
 
 patch -p1 < "$SUSFS_PATCH" || true
+
+# SUSFS_INLINE_HOOK 模式下部分函数不被调用，clang -Werror 会报 unused-function。
+# 用 __attribute__((unused)) 抑制，避免整轮构建因警告失败。
+if [[ -f fs/susfs.c ]]; then
+  sed -i 's/^static struct cred \*susfs_switch_to_ksu_domain(void)/static __attribute__((unused)) struct cred *susfs_switch_to_ksu_domain(void)/' fs/susfs.c
+  sed -i 's/^static void susfs_restore_creds(struct cred \*orig_cred)/static __attribute__((unused)) void susfs_restore_creds(struct cred *orig_cred)/' fs/susfs.c
+fi
 
 # 为尚未提供 SU 会话 FD 接口的 SukiSU/BakaSU 恢复旧版 exec hook 行为
 EXEC_HELPER=""
